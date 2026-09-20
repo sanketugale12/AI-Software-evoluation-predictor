@@ -1,0 +1,41 @@
+{
+  "name": "asep-vscode",
+  "displayName": "ASEP Intelligence",
+  "description": "Evidence-grounded engineering intelligence for your codebase",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:python"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "ASEP Intelligence",
+      "properties": {
+        "asep.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "The URL of the ASEP FastAPI backend"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "asep.analyzeFile",
+        "title": "ASEP: Analyze Current File"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageserver": "^4.0.0",
+    "vscode-languageserver-textdocument": "^1.0.0"
+  }
+}

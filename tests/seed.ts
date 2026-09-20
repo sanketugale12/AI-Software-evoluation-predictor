@@ -3,7 +3,7 @@ async function seedDatabase() {
   console.log("🌱 Seeding database with test repository...");
   try {
     // Using query param instead of header for better reliability in tests
-    const response = await fetch('http://localhost:8000/repositories/octocat/Hello-World/refresh?user_id=test_user', {
+    const response = await fetch('http://localhost:8008/repositories/octocat/Hello-World/refresh?user_id=test_user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

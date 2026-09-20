@@ -12,12 +12,12 @@ async function runFinalVerification() {
   console.log("🚀 Starting ASEP Full Feature Verification...\n");
 
   await testFeature("API Health", async () => {
-    const res = await fetch('http://localhost:8000/health');
+    const res = await fetch('http://localhost:8008/health');
     if (!res.ok) throw new Error("Health check failed");
   });
 
   await testFeature("PR Intelligence", async () => {
-    const res = await fetch('http://localhost:8000/repositories/octocat/Hello-World/refresh?user_id=test_user', {
+    const res = await fetch('http://localhost:8008/repositories/octocat/Hello-World/refresh?user_id=test_user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: 'mock_token' })
@@ -26,27 +26,27 @@ async function runFinalVerification() {
   });
 
   await testFeature("Issue Intelligence", async () => {
-    const res = await fetch('http://localhost:8000/repositories/octocat/Hello-World/tree?commit_sha=main&user_id=test_user');
+    const res = await fetch('http://localhost:8008/repositories/octocat/Hello-World/tree?commit_sha=main&user_id=test_user');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   });
 
   await testFeature("Ops Intelligence", async () => {
-    const res = await fetch('http://localhost:8000/repositories/octocat/Hello-World?user_id=test_user');
+    const res = await fetch('http://localhost:8008/repositories/octocat/Hello-World?user_id=test_user');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   });
 
   await testFeature("Grounded Assistant", async () => {
-    const res = await fetch('http://localhost:8000/health');
+    const res = await fetch('http://localhost:8008/health');
     if (!res.ok) throw new Error("API down");
   });
 
   await testFeature("Health Reporting", async () => {
-    const res = await fetch('http://localhost:8000/health');
+    const res = await fetch('http://localhost:8008/health');
     if (!res.ok) throw new Error("Health report failed");
   });
 
   await testFeature("Risk Prediction", async () => {
-    const res = await fetch('http://localhost:8000/repositories/octocat/Hello-World/refresh?user_id=test_user', {
+    const res = await fetch('http://localhost:8008/repositories/octocat/Hello-World/refresh?user_id=test_user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: 'mock_token' })
@@ -55,7 +55,7 @@ async function runFinalVerification() {
   });
 
   await testFeature("Security Sanitization", async () => {
-    const res = await fetch('http://localhost:8000/repositories/octocat/Hello-World/refresh?user_id=test_user', {
+    const res = await fetch('http://localhost:8008/repositories/octocat/Hello-World/refresh?user_id=test_user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: '1; rm -rf /' })
@@ -64,13 +64,13 @@ async function runFinalVerification() {
   });
 
   await testFeature("Incremental Analysis", async () => {
-    await fetch('http://localhost:8000/repositories/octocat/Hello-World/refresh?user_id=test_user', {
+    await fetch('http://localhost:8008/repositories/octocat/Hello-World/refresh?user_id=test_user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: 'mock_token' })
     });
     const start = Date.now();
-    await fetch('http://localhost:8000/repositories/octocat/Hello-World/refresh?user_id=test_user', {
+    await fetch('http://localhost:8008/repositories/octocat/Hello-World/refresh?user_id=test_user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ access_token: 'mock_token' })

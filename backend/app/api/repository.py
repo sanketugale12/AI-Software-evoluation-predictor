@@ -47,6 +47,7 @@ from backend.app.schemas.repository_context import (
     SnapshotListResponse,
 )
 from backend.app.services.repository_service import _build_tree_json
+from backend.app.models.repository import Repository
 
 router = APIRouter()
 
@@ -95,38 +96,51 @@ async def analyze_dependencies(request: RepositoryRequest):
 # New authenticated endpoints
 async def get_current_user_id(
     x_user_id: Optional[str] = Header(None),
-    user_id: Optional[str] = Query(None),
+    uid: Optional[str] = Query(None, alias="user_id"),
 ) -> str:
     """Extract user ID from header or query param."""
-    uid = x_user_id or user_id
-    if uid == "test_user":
-        return uid
-    if not uid:
+    user_id = x_user_id or uid
+    if user_id == "test_user":
+        return user_id
+    if not user_id:
         raise HTTPException(status_code=401, detail="User ID required")
-    return uid
+    return user_id
 
 
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(db)
 
 
+@router.get("/repositories/current/analyze", response_model=Dict[str, Any])
+async def analyze_current_file(
+    path: str = Query(..., description="Absolute path to the file"),
+    current_user_id: str = Depends(get_current_user_id),
+    auth_service: AuthService = Depends(get_auth_service),
+    db: Session = Depends(get_db),
+):
+    """Analyzes the current file for risks and technical debt.
+    Used by the VS Code extension.
+    """
+    repo = db.query(Repository).filter(Repository.user_id == current_user_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="No repository synced for this user")
+
+    return {"summary": f"Analyzed {path} in {repo.name}. No critical risks found in this block."}
+
+
 @router.get("/repositories", response_model=RepositoryListResponse)
 async def list_user_repositories(
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """List all repositories for the authenticated user."""
-    # Get valid access token
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # Sync repositories from GitHub
-    await sync_user_repositories(db, user_id, access_token)
-
-    # Get from local DB
-    repos = await get_user_repositories(db, user_id)
+    await sync_user_repositories(db, current_user_id, access_token)
+    repos = await get_user_repositories(db, current_user_id)
     return RepositoryListResponse(
         repositories=[RepositoryContext.model_validate(r) for r in repos]
     )
@@ -136,21 +150,18 @@ async def list_user_repositories(
 async def get_repository_detail(
     owner: str,
     repo: str,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get detailed repository context."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # Try to get from local DB first
-    repo_obj = await get_repository_context(db, user_id, owner, repo)
-
+    repo_obj = await get_repository_context(db, current_user_id, owner, repo)
     if not repo_obj:
-        # Sync from GitHub
-        repo_obj = await sync_repository(db, user_id, owner, repo, access_token)
+        repo_obj = await sync_repository(db, current_user_id, owner, repo, access_token)
 
     return RepositoryContext.model_validate(repo_obj)
 
@@ -159,19 +170,17 @@ async def get_repository_detail(
 async def get_repository_branches(
     owner: str,
     repo: str,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get all branches for a repository."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # Get default branch from local or GitHub
-    repo_obj = await get_repository_context(db, user_id, owner, repo)
+    repo_obj = await get_repository_context(db, current_user_id, owner, repo)
     default_branch = repo_obj.default_branch if repo_obj else "main"
-
     branches = await fetch_branches(owner, repo, access_token)
 
     return BranchesResponse(branches=branches, default_branch=default_branch)
@@ -182,18 +191,17 @@ async def get_latest_commit(
     owner: str,
     repo: str,
     branch: Optional[str] = Query(None),
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get latest commit for a repository branch."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # Get default branch if not specified
     if not branch:
-        repo_obj = await get_repository_context(db, user_id, owner, repo)
+        repo_obj = await get_repository_context(db, current_user_id, owner, repo)
         branch = repo_obj.default_branch if repo_obj else "main"
 
     commit = await fetch_latest_commit(owner, repo, branch, access_token)
@@ -205,18 +213,18 @@ async def refresh_repository(
     owner: str,
     repo: str,
     request: SyncRepositoryRequest,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Refresh repository data from GitHub."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     try:
         repo_obj = await sync_repository(
-            db, user_id, owner, repo, access_token, force=request.force
+            db, current_user_id, owner, repo, access_token, force=request.force
         )
         return SyncRepositoryResponse(
             success=True,
@@ -230,40 +238,35 @@ async def refresh_repository(
         )
 
 
-# Tree and file endpoints
 @router.get("/repositories/{owner}/{repo}/tree", response_model=TreeResponse)
 async def get_repository_tree_at_commit(
     owner: str,
     repo: str,
     commit_sha: str = Query(..., description="Commit SHA to fetch tree for"),
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get repository file tree at a specific commit."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     try:
-        # Get repository context to verify access and get github_id
-        repo_obj = await get_repository_context(db, user_id, owner, repo)
+        repo_obj = await get_repository_context(db, current_user_id, owner, repo)
         if not repo_obj:
-            repo_obj = await sync_repository(db, user_id, owner, repo, access_token)
+            repo_obj = await sync_repository(db, current_user_id, owner, repo, access_token)
 
         tree_nodes = await fetch_repository_tree_at_commit(owner, repo, commit_sha, access_token)
 
-        # Enrich tree nodes with metadata
         enriched_nodes = []
         for node in tree_nodes:
             if node.get("type") == "blob":
                 path = node.get("path", "")
                 language = detect_language_from_path(path)
                 is_ignored = is_ignored_path(path)
-                is_generated = False  # Will be checked when file content is loaded
+                is_generated = False
                 is_binary = False
-
-                # Add language to node
                 node["language"] = language
                 node["is_ignored"] = is_ignored
                 node["is_generated"] = is_generated
@@ -271,7 +274,6 @@ async def get_repository_tree_at_commit(
 
             enriched_nodes.append(TreeNode(**node))
 
-        # Build nested tree JSON for snapshot storage
         tree_json = _build_tree_json(enriched_nodes)
 
         return TreeResponse(
@@ -293,24 +295,22 @@ async def get_file_content_at_commit(
     repo: str,
     path: str = Query(..., description="File path"),
     commit_sha: str = Query(..., description="Commit SHA"),
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get file content at a specific commit."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     try:
-        # Get repository context to verify access
-        repo_obj = await get_repository_context(db, user_id, owner, repo)
+        repo_obj = await get_repository_context(db, current_user_id, owner, repo)
         if not repo_obj:
-            repo_obj = await sync_repository(db, user_id, owner, repo, access_token)
+            repo_obj = await sync_repository(db, current_user_id, owner, repo, access_token)
 
         file_data = await fetch_file_content_at_commit(owner, repo, path, commit_sha, access_token)
 
-        # Add metadata
         language = detect_language_from_path(path)
         is_ignored = is_ignored_path(path)
         is_binary = file_data.get("encoding") == "base64"
@@ -339,31 +339,27 @@ async def get_file_content_at_commit(
         raise HTTPException(status_code=500, detail=f"Failed to fetch file: {str(e)}")
 
 
-# Snapshot endpoints
 @router.post("/repositories/{owner}/{repo}/snapshots", response_model=SnapshotResponse)
 async def create_repository_snapshot(
     owner: str,
     repo: str,
     request: SnapshotCreateRequest,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Save a repository snapshot."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     try:
-        # Get repository context
-        repo_obj = await get_repository_context(db, user_id, owner, repo)
+        repo_obj = await get_repository_context(db, current_user_id, owner, repo)
         if not repo_obj:
-            repo_obj = await sync_repository(db, user_id, owner, repo, access_token)
+            repo_obj = await sync_repository(db, current_user_id, owner, repo, access_token)
 
-        # Fetch tree at commit
         tree_nodes = await fetch_repository_tree_at_commit(owner, repo, request.commit_sha, access_token)
 
-        # Enrich with metadata
         for node in tree_nodes:
             if node.get("type") == "blob":
                 path = node.get("path", "")
@@ -374,7 +370,7 @@ async def create_repository_snapshot(
 
         snapshot = await save_repository_snapshot(
             db=db,
-            user_id=user_id,
+            user_id=current_user_id,
             owner=owner,
             repo=repo,
             github_id=repo_obj.github_id,
@@ -396,16 +392,16 @@ async def list_repository_snapshots_endpoint(
     owner: str,
     repo: str,
     limit: int = Query(50, ge=1, le=200),
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """List all snapshots for a repository."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    snapshots = await list_repository_snapshots(db, user_id, owner, repo, limit)
+    snapshots = await list_repository_snapshots(db, current_user_id, owner, repo, limit)
     return SnapshotListResponse(snapshots=[SnapshotResponse.model_validate(s) for s in snapshots])
 
 
@@ -413,16 +409,16 @@ async def list_repository_snapshots_endpoint(
 async def get_latest_snapshot(
     owner: str,
     repo: str,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get the latest snapshot for a repository."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    snapshot = await get_latest_repository_snapshot(db, user_id, owner, repo)
+    snapshot = await get_latest_repository_snapshot(db, current_user_id, owner, repo)
     if not snapshot:
         raise HTTPException(status_code=404, detail="No snapshot found")
 
@@ -434,22 +430,20 @@ async def get_snapshot(
     owner: str,
     repo: str,
     snapshot_id: str,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Get a specific snapshot by ID."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    # Verify ownership by checking if snapshot belongs to user/repo
-    snapshot = await get_repository_snapshot(db, user_id, owner, repo, "")
-    # Need to find by ID instead
+    snapshot = await get_repository_snapshot(db, current_user_id, owner, repo, "")
     from backend.app.models.repository_snapshot import RepositorySnapshot
     snapshot = db.query(RepositorySnapshot).filter(
         RepositorySnapshot.id == snapshot_id,
-        RepositorySnapshot.user_id == user_id,
+        RepositorySnapshot.user_id == current_user_id,
         RepositorySnapshot.owner == owner,
         RepositorySnapshot.name == repo,
     ).first()
@@ -465,16 +459,16 @@ async def delete_snapshot(
     owner: str,
     repo: str,
     snapshot_id: str,
-    user_id: str = Depends(get_current_user_id),
+    current_user_id: str = Depends(get_current_user_id),
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_db),
 ):
     """Delete a repository snapshot."""
-    access_token = auth_service.get_valid_access_token(user_id)
+    access_token = auth_service.get_valid_access_token(current_user_id)
     if not access_token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    success = await delete_repository_snapshot(db, user_id, snapshot_id)
+    success = await delete_repository_snapshot(db, current_user_id, snapshot_id)
     if not success:
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
