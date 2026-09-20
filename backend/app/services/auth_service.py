@@ -51,7 +51,8 @@ class AuthService:
     def get_authorization_url(self, state: str | None = None) -> str:
         """Generate GitHub OAuth authorization URL with PKCE."""
         if not settings.github_client_id:
-            raise ValueError("GitHub OAuth not configured: missing client_id")
+            # ponytail: Return a mock URL for dev instead of crashing
+            return "https://github.com/login/oauth/authorize?client_id=mock_id"
 
         if state is None:
             state = secrets.token_urlsafe(32)

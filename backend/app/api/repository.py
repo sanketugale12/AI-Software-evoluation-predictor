@@ -80,12 +80,16 @@ class DependencyGraphResponse(BaseModel):
 @router.post("/api/repository", response_model=RepositoryResponse)
 @router.post("/analyze", response_model=RepositoryResponse)
 async def get_repository(request: RepositoryRequest):
-    return await fetch_repository_details(request.url)
+    from backend.app.services.github_service import extract_repository, fetch_repository_details
+    owner, repo = await extract_repository(request.url)
+    return await fetch_repository_details(owner, repo)
 
 
 @router.get("/api/repository/tree", response_model=RepositoryTreeResponse)
 async def get_repository_tree(url: str = Query(..., description="GitHub repository URL")):
-    return await fetch_repository_tree(url)
+    from backend.app.services.github_service import extract_repository, fetch_repository_tree
+    owner, repo = await extract_repository(url)
+    return await fetch_repository_tree(owner, repo)
 
 
 @router.post("/api/analysis/dependencies", response_model=DependencyGraphResponse)
