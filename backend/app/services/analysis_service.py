@@ -18,7 +18,7 @@ async def get_dependency_graph(url: str) -> DependencyGraphResponse:
     # 2. Get the default branch
     # We can reuse fetch_repository_tree's logic or just call it.
     # To avoid redundant API calls, let's just get the tree first.
-    tree_res = await fetch_repository_tree(url)
+    tree_res = await fetch_repository_tree(owner, repo)
     files_list = tree_res.files
 
     # 3. Fetch content for all supported files
