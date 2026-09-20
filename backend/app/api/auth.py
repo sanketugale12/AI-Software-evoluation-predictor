@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from backend.app.database import get_db
+from backend.app.config import settings
 from backend.app.services.auth_service import AuthService
 from backend.app.schemas.auth import (
     AuthUrlResponse,
@@ -55,14 +56,14 @@ async def github_callback(
         auth_service.store_tokens(user, token_data)
 
         # Redirect to frontend with success
-        frontend_url = "chrome-extension://*"  # Will be replaced by actual extension ID
+        frontend_url = settings.frontend_url
         return RedirectResponse(
             url=f"{frontend_url}/auth/callback?success=true&user_id={user.id}"
         )
 
     except Exception as e:
         # Redirect to frontend with error
-        frontend_url = "chrome-extension://*"
+        frontend_url = settings.frontend_url
         return RedirectResponse(
             url=f"{frontend_url}/auth/callback?success=false&error={str(e)}"
         )

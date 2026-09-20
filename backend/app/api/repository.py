@@ -115,6 +115,36 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(db)
 
 
+@router.get("/repositories/current/analyze/finding", response_model=Dict[str, Any])
+async def analyze_finding_detail(
+    id: str = Query(..., description="Finding ID"),
+    current_user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Provides detailed analysis for a specific finding."""
+    # ponytail: Mocking detail data based on ID for now
+    details = {
+        "finding_1": {
+            "reasoning": "This block contains deeply nested conditionals and repeated logic that increases cognitive load.",
+            "impact": "Maintenance overhead; higher risk of introducing bugs during future changes.",
+            "suggestedFix": "Extract the inner logic into a separate private method and use a guard clause to flatten the nesting."
+        },
+        "finding_2": {
+            "reasoning": "The function performs multiple unrelated tasks (data fetching, transformation, and logging) in a single block.",
+            "impact": "Difficult to unit test in isolation; violates Single Responsibility Principle.",
+            "suggestedFix": "Split the function into three smaller functions: `fetch_data()`, `transform_data()`, and `log_metrics()`."
+        }
+    }
+
+    detail = details.get(id, {
+        "reasoning": "No detailed analysis available for this finding.",
+        "impact": "Unknown",
+        "suggestedFix": "Review the code manually for potential improvements."
+    })
+
+    return detail
+
+
 @router.get("/repositories/current/analyze", response_model=Dict[str, Any])
 async def analyze_current_file(
     path: str = Query(..., description="Absolute path to the file"),
@@ -129,7 +159,25 @@ async def analyze_current_file(
     if not repo:
         raise HTTPException(status_code=404, detail="No repository synced for this user")
 
-    return {"summary": f"Analyzed {path} in {repo.name}. No critical risks found in this block."}
+    return {
+        "summary": f"Analyzed {path} in {repo.name}.",
+        "findings": [
+            {
+                "id": "finding_1",
+                "line": 10,
+                "column": 5,
+                "message": "Potential technical debt: Consider refactoring this block for better maintainability.",
+                "severity": "Information"
+            },
+            {
+                "id": "finding_2",
+                "line": 25,
+                "column": 1,
+                "message": "High complexity detected in this function. Suggest breaking it down.",
+                "severity": "Warning"
+            }
+        ]
+    }
 
 
 @router.get("/repositories", response_model=RepositoryListResponse)

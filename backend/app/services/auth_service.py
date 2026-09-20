@@ -212,8 +212,6 @@ class AuthService:
 
     def get_valid_access_token(self, user_id: str) -> Optional[str]:
         """Get a valid access token for user, refreshing if needed."""
-        print(f"DEBUG AUTH: get_valid_access_token called for {user_id}")
-        return "mock_token"
 
         github_token = (
             self.db.query(GitHubToken)
