@@ -1,9 +1,11 @@
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+
     # GitHub OAuth
     github_client_id: str | None = None
     github_client_secret: str | None = None
@@ -37,10 +39,6 @@ class Settings(BaseSettings):
         ".pytest_cache/", ".mypy_cache/", ".tox/", "*.egg-info/",
         "vendor/", "bower_components/", "jspm_packages/",
     ]
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
 
 
 settings = Settings()
