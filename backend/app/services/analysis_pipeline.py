@@ -1,21 +1,25 @@
-from backend.app.services.repository_service import clone_repository
-from backend.app.services.ingestion_service import (
+from ..services.repository_service import clone_repository
+from ..services.ingestion_service import (
     IngestionConfig,
     IngestionError,
     validate_repository_size,
     cleanup_workspace,
     monitor_disk_usage,
 )
-from backend.app.analyzers.technical_debt import run_complexity_analysis
-from backend.app.analyzers.git_history import analyze_git_history
-from backend.app.analyzers.security_analyzer import run_security_scan
-from backend.app.analyzers.hotspot_analyzer import analyze_hotspots
-from backend.app.analyzers.evolution_analyzer import EvolutionAnalyzer
+from ..analyzers.technical_debt import run_complexity_analysis
+from ..analyzers.git_history import analyze_git_history
+from ..analyzers.security_analyzer import run_security_scan
+from ..analyzers.hotspot_analyzer import analyze_hotspots
+from ..analyzers.evolution_analyzer import EvolutionAnalyzer
+from ..analyzers.maintainability import run_maintainability_analysis
+from ..analyzers.arch_intelligence import analyze_architecture
+from ..analyzers.ast_analyzer import analyze_ast
 from typing import Callable, Optional
 import logging
 import time
 import signal
 import threading
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +108,24 @@ def analyze_repository(
             if check_cancelled():
                 raise Exception("Analysis cancelled by user")
 
+            # Step 1b: Maintainability Analysis
+            report_progress("maintainability", "Running maintainability analysis...")
+            maintainability = run_maintainability_analysis(repo_path)
+
+            if check_cancelled():
+                raise Exception("Analysis cancelled by user")
+
             # Monitor disk usage
             if not monitor_disk_usage(repo_path, config.max_disk_usage_mb):
                 raise Exception(f"Disk usage exceeded maximum: {config.max_disk_usage_mb}MB")
 
             # Step 2: Git History Analysis
             report_progress("git_history", "Analyzing git history...")
-            history = analyze_git_history(repo_path)
+            try:
+                history = analyze_git_history(repo_path)
+            except Exception as e:
+                logger.error(f"Git history analysis failed: {e}")
+                history = None
 
             if check_cancelled():
                 raise Exception("Analysis cancelled by user")
@@ -122,6 +137,22 @@ def analyze_repository(
             if check_cancelled():
                 raise Exception("Analysis cancelled by user")
 
+            # Step 3b: Architecture Analysis
+            report_progress("architecture", "Analyzing architecture...")
+            all_symbols = []
+            for root, _, files in os.walk(repo_path):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    try:
+                        all_symbols.extend(analyze_ast(full_path))
+                    except Exception as e:
+                        logger.debug(f"AST analysis failed for {file}: {e}")
+
+            architecture = analyze_architecture(all_symbols)
+
+            if check_cancelled():
+                raise Exception("Analysis cancelled by user")
+
             # Step 4: Evolution & Hotspot Analysis
             report_progress("hotspots", "Identifying evolution hotspots...")
 
@@ -129,14 +160,15 @@ def analyze_repository(
             evo_analyzer = EvolutionAnalyzer()
 
             # Correlate Git, Complexity, and Security data
-            # We use a simplified centrality map for now (could be integrated from arch_intelligence)
-            centrality_map = {path: 0.1 for path in history["file_changes"]}
-
-            hotspots = evo_analyzer.analyze(
-                git_data=history,
-                arch_data=centrality_map,
-                security_data=security
-            )
+            if history:
+                centrality_map = {path: 0.1 for path in history["file_changes"]}
+                hotspots = evo_analyzer.analyze(
+                    git_data=history,
+                    arch_data=centrality_map,
+                    security_data=security
+                )
+            else:
+                hotspots = None
 
             if check_cancelled():
                 raise Exception("Analysis cancelled by user")
@@ -162,6 +194,8 @@ def analyze_repository(
                     "clone_duration_seconds": stats.clone_duration_seconds if stats else 0,
                 } if stats else None,
                 "complexity": complexity,
+                "maintainability": maintainability,
+                "architecture": architecture,
                 "history": history,
                 "security": security,
                 "hotspots": hotspots,
@@ -179,7 +213,7 @@ def analyze_repository(
         raise Exception(f"Repository ingestion failed: {e.message}")
 
 
-def calculate_technical_debt(complexity: dict, history: dict) -> dict:
+def calculate_technical_debt(complexity: dict, history: Optional[dict]) -> dict:
     """
     Calculate technical debt metrics from complexity and history data.
     """
@@ -198,8 +232,8 @@ def calculate_technical_debt(complexity: dict, history: dict) -> dict:
     avg_complexity = total_complexity / file_count if file_count > 0 else 0
 
     # Get churn from history
-    total_churn = history.get("metrics", {}).get("total_churn", 0)
-    commit_frequency = history.get("metrics", {}).get("commit_frequency", 0)
+    total_churn = history.get("metrics", {}).get("total_churn", 0) if history else 0
+    commit_frequency = history.get("metrics", {}).get("commit_frequency", 0) if history else 0
 
     # Simple technical debt score
     debt_score = (avg_complexity * 0.5) + (high_complexity_files * 2) + (total_churn * 0.01) + (commit_frequency * 0.1)
@@ -212,5 +246,6 @@ def calculate_technical_debt(complexity: dict, history: dict) -> dict:
         "total_churn": total_churn,
         "commit_frequency": commit_frequency,
         "debt_score": round(debt_score, 2),
-        "risk_level": "High" if debt_score > 50 else "Medium" if debt_score > 20 else "Low"
+        "risk_level": "High" if debt_score > 50 else "Medium" if debt_score > 20 else "Low",
+        "history_available": history is not None
     }

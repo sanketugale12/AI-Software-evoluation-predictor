@@ -4,8 +4,8 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from backend.app.database import get_db
-from backend.app.services.github_service import (
+from ..database import get_db
+from ..services.github_service import (
     fetch_repository_details,
     fetch_repository_tree,
     fetch_branches,
@@ -18,7 +18,7 @@ from backend.app.services.github_service import (
     is_generated_file,
     is_binary_content,
 )
-from backend.app.services.repository_service import (
+from ..services.repository_service import (
     sync_repository,
     get_user_repositories,
     get_repository_context,
@@ -29,10 +29,10 @@ from backend.app.services.repository_service import (
     list_repository_snapshots,
     delete_repository_snapshot,
 )
-from backend.app.services.auth_service import AuthService
-from backend.app.services.analysis_service import get_dependency_graph
-from backend.app.schemas.repository import DependencyNode, DependencyEdge
-from backend.app.schemas.repository_context import (
+from ..services.auth_service import AuthService
+from ..services.analysis_service import get_dependency_graph
+from ..schemas.repository import DependencyNode, DependencyEdge
+from ..schemas.repository_context import (
     RepositoryContext,
     RepositoryListResponse,
     BranchesResponse,
@@ -46,8 +46,8 @@ from backend.app.schemas.repository_context import (
     SnapshotResponse,
     SnapshotListResponse,
 )
-from backend.app.services.repository_service import _build_tree_json
-from backend.app.models.repository import Repository
+from ..services.repository_service import _build_tree_json
+from ..models.repository import Repository
 
 router = APIRouter()
 

@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api import repository, graph, analysis, auth, architecture
+from .api import repository, graph, analysis, auth, architecture, analysis_comparison
 from .database import engine, Base
 from .models import User, GitHubToken, Repository, AnalysisJob, RepositorySnapshot
+
 
 app = FastAPI(title="ASEP Backend")
 
@@ -22,6 +23,7 @@ app.include_router(repository.router)
 app.include_router(graph.router)
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(architecture.router, prefix="/api/architecture", tags=["Architecture"])
+app.include_router(analysis_comparison.router, prefix="/api/analysis", tags=["Comparison"])
 
 @app.get("/")
 def home():
