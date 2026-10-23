@@ -16,7 +16,7 @@ class MultiLanguageParser:
         }
         # Initialize parsers with their respective languages
         for ext, (parser, lang) in self.parsers.items():
-            parser.set_language(lang)
+            parser.language = lang
 
     def parse_file(self, file_path: str) -> List[SymbolRecord]:
         ext = os.path.splitext(file_path)[1]

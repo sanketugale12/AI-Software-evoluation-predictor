@@ -14,21 +14,32 @@ import type {
   BranchInfo,
   RepositoryContext,
 } from "@/types";
-import {
-  fetchRepositoryDetails,
-  fetchRepositoryTree,
-  fetchDependencyGraph,
-  createAnalysisJob,
-  createAnalysisJobForRepo,
-  cancelAnalysisJob,
-  retryAnalysisJob,
-  pollAnalysisJob,
-  getRepositoryContext,
-  getRepositoryBranches,
-  fetchRepositoryTreeAtCommit,
-  fetchFileContentAtCommit,
-  createSnapshot as apiCreateSnapshot,
-} from "@/services/api";
+import { asepClient } from "@/services/api";
+
+async function pollAnalysisJobLocal(
+  jobId: string,
+  onUpdate: (job: AnalysisJob, results?: AnalysisResults) => void,
+  intervalMs: number = 3000,
+  maxAttempts: number = 100
+): Promise<AnalysisResults> {
+  let attempts = 0;
+  while (attempts < maxAttempts) {
+    const job = await asepClient.getAnalysisJobStatus(jobId);
+    onUpdate(job);
+    if (job.status === "completed" || job.status === "failed") {
+      const results = await asepClient.getAnalysisResults(jobId);
+      onUpdate(job, results);
+      return results;
+    }
+    if (job.status === "cancelled") {
+      onUpdate(job);
+      throw new Error("Analysis cancelled");
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    attempts++;
+  }
+  throw new Error("Analysis timed out");
+}
 
 type Action =
   | { type: "SET_REPO_URL"; payload: string }
@@ -63,7 +74,6 @@ const initialState: WorkspaceState = {
   error: null,
   user: null,
   isAuthenticated: false,
-  // New state for file explorer
   repoContext: null,
   branches: [],
   selectedCommit: "",
@@ -125,7 +135,6 @@ interface WorkspaceContextType extends WorkspaceState {
   retryAnalysis: () => Promise<void>;
   setActivePage: (page: ActivePage) => void;
   clearError: () => void;
-  // File explorer methods
   loadRepositoryContext: (owner: string, repo: string) => Promise<void>;
   loadBranches: (owner: string, repo: string) => Promise<void>;
   selectCommit: (commitSha: string) => Promise<void>;
@@ -140,7 +149,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, initialState);
   const { user, isAuthenticated } = useAuth();
 
-  // Sync auth state
   useEffect(() => {
     dispatch({ type: "SET_USER", payload: user });
     dispatch({ type: "SET_AUTHENTICATED", payload: isAuthenticated });
@@ -150,7 +158,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleMessage = (message: any) => {
       if (message.type === "REPO_DETECTED" && message.url) {
-        loadRepository(message.url);
+        if (isAuthenticated) {
+          loadRepository(message.url);
+        } else {
+          // Store pending repo to load after login
+          localStorage.setItem("asep_pending_repo", message.url);
+        }
       }
     };
 
@@ -158,7 +171,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       browser.runtime.onMessage.addListener(handleMessage);
       return () => browser.runtime.onMessage.removeListener(handleMessage);
     }
-  }, []);
+  }, [isAuthenticated]);
+
+  // Auto-load pending repo after authentication or on mount
+  useEffect(() => {
+    if (isAuthenticated) {
+      const pendingRepo = localStorage.getItem("asep_pending_repo");
+      if (pendingRepo) {
+        console.log("ASEP: Loading pending repository:", pendingRepo);
+        loadRepository(pendingRepo);
+        localStorage.removeItem("asep_pending_repo");
+      }
+    }
+  }, [isAuthenticated]);
 
   const loadRepository = async (url: string) => {
     dispatch({ type: "SET_REPO_URL", payload: url });
@@ -171,18 +196,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_ANALYSIS_RESULTS", payload: null });
 
     try {
-      // Fetch repository details and tree in parallel
       const [details, tree] = await Promise.all([
-        fetchRepositoryDetails(url),
-        fetchRepositoryTree(url),
+        asepClient.analyzeRepository(url),
+        asepClient.getRepositoryTree(url),
       ]);
 
       dispatch({ type: "SET_REPO_DETAILS", payload: details });
       dispatch({ type: "SET_REPO_TREE", payload: tree });
 
-      // Fetch dependency graph
       try {
-        const graph = await fetchDependencyGraph(url);
+        const graph = await asepClient.fetchDependencyGraph(url);
         dispatch({ type: "SET_DEPENDENCY_GRAPH", payload: graph });
       } catch (graphError) {
         console.warn("Failed to fetch dependency graph:", graphError);
@@ -196,11 +219,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const loadRepositoryContext = useCallback(async (owner: string, repo: string) => {
     try {
-      const context = await getRepositoryContext(owner, repo);
+      const context = await asepClient.getRepositoryContext(owner, repo);
       dispatch({ type: "SET_REPO_CONTEXT", payload: context });
       dispatch({ type: "SET_SELECTED_COMMIT", payload: context.default_branch });
-
-      // Load branches
       await loadBranches(owner, repo);
     } catch (err: any) {
       console.error("Failed to load repository context:", err);
@@ -209,7 +230,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const loadBranches = useCallback(async (owner: string, repo: string) => {
     try {
-      const response = await getRepositoryBranches(owner, repo);
+      const response = await asepClient.getRepositoryBranches(owner, repo);
       dispatch({ type: "SET_BRANCHES", payload: response.branches });
     } catch (err: any) {
       console.error("Failed to load branches:", err);
@@ -218,13 +239,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const selectCommit = useCallback(async (commitSha: string) => {
     if (!state.repoContext) return;
-
     dispatch({ type: "SET_SELECTED_COMMIT", payload: commitSha });
     dispatch({ type: "SET_FILE_LOADING", payload: true });
     dispatch({ type: "SET_SELECTED_FILE", payload: null });
-
     try {
-      const treeResponse = await fetchRepositoryTreeAtCommit(
+      const treeResponse = await asepClient.fetchRepositoryTreeAtCommit(
         state.repoContext.owner,
         state.repoContext.name,
         commitSha
@@ -240,11 +259,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const loadFile = useCallback(async (node: TreeNode) => {
     if (!state.repoContext || !state.selectedCommit) return;
-
     dispatch({ type: "SET_FILE_LOADING", payload: true });
-
     try {
-      const fileContent = await fetchFileContentAtCommit(
+      const fileContent = await asepClient.fetchFileContentAtCommit(
         state.repoContext.owner,
         state.repoContext.name,
         node.path,
@@ -265,23 +282,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const createSnapshot = useCallback(async () => {
     if (!state.repoContext || !state.selectedCommit || !state.treeAtCommit) return;
-
     dispatch({ type: "SET_SNAPSHOT_SAVING", payload: true });
-
     try {
       const treeJson = state.treeAtCommit.tree_json as Record<string, unknown> | undefined;
-
-      await apiCreateSnapshot(
+      await asepClient.createSnapshot(
         state.repoContext.owner,
         state.repoContext.name,
         state.selectedCommit,
-        undefined, // commitMessage
-        undefined, // commitDate
+        undefined,
+        undefined,
         treeJson
       );
     } catch (err: any) {
       console.error("Failed to create snapshot:", err);
-      // Could dispatch an error here
     } finally {
       dispatch({ type: "SET_SNAPSHOT_SAVING", payload: false });
     }
@@ -292,20 +305,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_ERROR", payload: "No repository selected" });
       return;
     }
-
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_ERROR", payload: null });
     dispatch({ type: "SET_ANALYSIS_JOB", payload: null });
     dispatch({ type: "SET_ANALYSIS_RESULTS", payload: null });
-
     try {
-      // Use selected commit if available, otherwise use default branch
       const commitSha = state.selectedCommit || state.repoContext.default_branch;
-      const job = await createAnalysisJobForRepo(state.repoContext.owner, state.repoContext.name, commitSha);
+      const job = await asepClient.createAnalysisJobForRepo(state.repoContext.owner, state.repoContext.name, commitSha);
       dispatch({ type: "SET_ANALYSIS_JOB", payload: job });
-
-      // Poll for results
-      const results = await pollAnalysisJob(
+      const results = await pollAnalysisJobLocal(
         job.job_id,
         (jobUpdate, resultsUpdate) => {
           dispatch({ type: "SET_ANALYSIS_JOB", payload: jobUpdate });
@@ -314,7 +322,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           }
         }
       );
-
       dispatch({ type: "SET_ANALYSIS_RESULTS", payload: results });
     } catch (err: any) {
       dispatch({ type: "SET_ERROR", payload: err.message || "Analysis failed" });
@@ -325,10 +332,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const cancelAnalysis = async () => {
     if (!state.analysisJob) return;
-
     try {
-      await cancelAnalysisJob(state.analysisJob.job_id);
-      // The polling will pick up the cancelled status
+      await asepClient.cancelAnalysisJob(state.analysisJob.job_id);
     } catch (err: any) {
       dispatch({ type: "SET_ERROR", payload: err.message || "Failed to cancel analysis" });
     }
@@ -336,17 +341,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const retryAnalysis = async () => {
     if (!state.analysisJob) return;
-
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_ERROR", payload: null });
     dispatch({ type: "SET_ANALYSIS_RESULTS", payload: null });
-
     try {
-      const job = await retryAnalysisJob(state.analysisJob.job_id);
+      const job = await asepClient.retryAnalysisJob(state.analysisJob.job_id);
       dispatch({ type: "SET_ANALYSIS_JOB", payload: job });
-
-      // Poll for results
-      const results = await pollAnalysisJob(
+      const results = await pollAnalysisJobLocal(
         job.job_id,
         (jobUpdate, resultsUpdate) => {
           dispatch({ type: "SET_ANALYSIS_JOB", payload: jobUpdate });
@@ -355,7 +356,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           }
         }
       );
-
       dispatch({ type: "SET_ANALYSIS_RESULTS", payload: results });
     } catch (err: any) {
       dispatch({ type: "SET_ERROR", payload: err.message || "Analysis retry failed" });

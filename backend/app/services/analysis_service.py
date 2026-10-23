@@ -3,7 +3,8 @@ import httpx
 from backend.app.services.github_service import (
     extract_repository,
     fetch_repository_tree,
-    fetch_file_content
+    fetch_file_content,
+    get_github_headers
 )
 from backend.app.analyzers.dependency_graph import build_dependency_graph
 from backend.app.schemas.repository import DependencyGraphResponse, DependencyNode, DependencyEdge
@@ -29,7 +30,7 @@ async def get_dependency_graph(url: str) -> DependencyGraphResponse:
                 # We'll use a simple loop for now. In production, we'd use asyncio.gather.
                 # Using the existing fetch_file_content logic but passing the client.
                 api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-                response = await client.get(api_url)
+                response = await client.get(api_url, headers=get_github_headers())
                 if response.status_code == 200:
                     import base64
                     data = response.json()

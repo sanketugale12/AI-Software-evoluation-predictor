@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Code, RefreshCw, Maximize, AlertTriangle, Network, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
-import { fetchArchitectureMetrics } from "@/services/api";
+import { asepClient } from "@/services/api";
 
 export function Architecture() {
   const { dependencyGraph, repoDetails, isLoading } = useWorkspace();
@@ -17,7 +17,7 @@ export function Architecture() {
       if (repoDetails?.id) {
         setFetchingMetrics(true);
         try {
-          const metrics = await fetchArchitectureMetrics(repoDetails.id);
+          const metrics = await asepClient.fetchArchitectureMetrics(repoDetails.id);
           setArchMetrics(metrics);
         } catch (e) {
           console.error("Failed to fetch architecture metrics:", e);

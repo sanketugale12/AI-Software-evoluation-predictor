@@ -4,7 +4,7 @@ import React, { useState, useCallback } from "react";
 import { Download, Database, Loader2, CheckCircle, AlertCircle, Trash2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/context/WorkspaceContext";
-import { createSnapshot, listSnapshots } from "@/services/api";
+import { asepClient } from "@/services/api";
 import type { Snapshot, RepositoryContext } from "@/types";
 
 interface SnapshotActionsProps {
@@ -25,7 +25,7 @@ export function SnapshotActions({ className }: SnapshotActionsProps) {
 
     setIsLoadingSnapshots(true);
     try {
-      const response = await listSnapshots(repoContext.owner, repoContext.name);
+      const response = await asepClient.listSnapshots(repoContext.owner, repoContext.name);
       setSnapshots(response.snapshots);
     } catch (err) {
       console.error("Failed to load snapshots:", err);
@@ -51,7 +51,7 @@ export function SnapshotActions({ className }: SnapshotActionsProps) {
 
       const treeJson = treeAtCommit.tree_json as Record<string, unknown> | undefined;
 
-      await createSnapshot(
+      await asepClient.createSnapshot(
         repoContext.owner,
         repoContext.name,
         selectedCommit,

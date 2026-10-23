@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from "react";
-import { getAuthStatus, logout as apiLogout, setCurrentUserId, getGitHubLoginUrl } from "@/services/api";
+import { asepClient, setCurrentUserId } from "@/services/api";
 import type { UserResponse, AuthStatusResponse } from "@/types";
 
 type AuthState = {
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const checkAuth = async () => {
     dispatch({ type: "SET_LOADING", payload: true });
     try {
-      const response = await getAuthStatus();
+      const response = await asepClient.getAuthStatus();
       if (response.authenticated && response.user) {
         setCurrentUserId(response.user.id);
         dispatch({ type: "SET_USER", payload: response.user });
@@ -77,14 +77,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = () => {
-    const authUrl = getGitHubLoginUrl();
+    const authUrl = asepClient.getGitHubLoginUrl();
     // Open in new tab for OAuth flow
     window.open(authUrl, "_blank", "width=600,height=700");
   };
 
   const logout = async () => {
     try {
-      await apiLogout();
+      await asepClient.logout();
     } catch (error) {
       console.error("Logout error:", error);
     } finally {

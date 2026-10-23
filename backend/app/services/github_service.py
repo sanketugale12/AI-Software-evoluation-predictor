@@ -453,6 +453,46 @@ def detect_language_from_path(path: str) -> Optional[str]:
     return None
 
 
+async def fetch_commit_files(
+    owner: str, repo: str, commit_sha: str, access_token: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Fetch files changed in a specific commit.
+    """
+    headers = get_github_headers(access_token)
+
+    async with httpx.AsyncClient() as client:
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}"
+        response = await client.get(api_url, headers=headers)
+
+    if response.status_code != 200:
+        if response.status_code == 403:
+            raise HTTPException(status_code=403, detail="GitHub API rate limit exceeded")
+        raise HTTPException(status_code=response.status_code, detail="Could not fetch commit files")
+
+    data = response.json()
+    files = []
+    for file in data.get("files", []):
+        files.append({
+            "filename": file["filename"],
+            "status": file["status"],
+            "additions": file["additions"],
+            "deletions": file["deletions"],
+            "changes": file["changes"],
+        })
+
+    return files
+
+def is_binary_content(content: Any) -> bool:
+    """Check if content is binary. Returns True if content is not a string or cannot be decoded as UTF-8."""
+    if not isinstance(content, str):
+        return True
+    try:
+        content.encode('utf-8')
+        return False
+    except UnicodeEncodeError:
+        return True
+
 def is_ignored_path(path: str) -> bool:
     """Check if path matches common ignore patterns."""
     import fnmatch
@@ -526,15 +566,135 @@ def is_generated_file(path: str, content: Optional[str] = None) -> bool:
     return False
 
 
-def is_binary_content(content: Optional[str]) -> bool:
-    """Check if content appears to be binary."""
-    if content is None:
-        return True
-    # Check for null bytes (common in binary files)
-    if "\x00" in content:
-        return True
-    # Check ratio of printable characters
-    printable = sum(1 for c in content if c.isprintable() or c in "\n\r\t")
-    if len(content) > 0 and (printable / len(content)) < 0.7:
-        return True
-    return False
+async def fetch_pull_requests(
+    owner: str, repo: str, access_token: Optional[str] = None
+) -> list:
+    """Fetch pull requests for a repository."""
+    headers = get_github_headers(access_token)
+
+    async with httpx.AsyncClient() as client:
+        # Use the pulls API
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&per_page=100"
+        response = await client.get(api_url, headers=headers)
+
+    if response.status_code != 200:
+        if response.status_code == 403:
+            raise HTTPException(status_code=403, detail="GitHub API rate limit exceeded")
+        raise HTTPException(status_code=response.status_code, detail="Could not fetch pull requests")
+
+    prs = []
+    for pr in response.json():
+        prs.append({
+            "id": pr["id"],
+            "number": pr["number"],
+            "title": pr["title"],
+            "state": pr["state"],
+            "user": pr["user"]["login"],
+            "created_at": pr["created_at"],
+            "closed_at": pr["closed_at"],
+            "merged_at": pr["merged_at"],
+            "base": pr["base"]["ref"],
+            "head": pr["head"]["sha"],
+            "html_url": pr["html_url"],
+        })
+
+    return prs
+
+
+async def fetch_issues(
+    owner: str, repo: str, access_token: Optional[str] = None
+) -> list:
+    """Fetch issues for a repository."""
+    headers = get_github_headers(access_token)
+
+    async with httpx.AsyncClient() as client:
+        # GitHub Issues API also returns PRs unless filtered
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/issues?state=all&per_page=100"
+        response = await client.get(api_url, headers=headers)
+
+    if response.status_code != 200:
+        if response.status_code == 403:
+            raise HTTPException(status_code=403, detail="GitHub API rate limit exceeded")
+        raise HTTPException(status_code=response.status_code, detail="Could not fetch issues")
+
+    issues = []
+    for issue in response.json():
+        # Skip pull requests (they have a 'pull_request' key)
+        if "pull_request" in issue:
+            continue
+
+        issues.append({
+            "id": issue["id"],
+            "number": issue["number"],
+            "title": issue["title"],
+            "state": issue["state"],
+            "user": issue["user"]["login"],
+            "created_at": issue["created_at"],
+            "closed_at": issue["closed_at"],
+            "labels": [label["name"] for label in issue["labels"]],
+            "html_url": issue["html_url"],
+        })
+
+    return issues
+
+
+async def fetch_workflow_runs(
+    owner: str, repo: str, access_token: Optional[str] = None
+) -> list:
+    """Fetch CI/CD workflow runs."""
+    headers = get_github_headers(access_token)
+
+    async with httpx.AsyncClient() as client:
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs?per_page=100"
+        response = await client.get(api_url, headers=headers)
+
+    if response.status_code != 200:
+        if response.status_code == 403:
+            raise HTTPException(status_code=403, detail="GitHub API rate limit exceeded")
+        raise HTTPException(status_code=response.status_code, detail="Could not fetch workflow runs")
+
+    runs_data = response.json()
+    runs = []
+    for run in runs_data.get("workflow_runs", []):
+        runs.append({
+            "id": run["id"],
+            "workflow_id": run["workflow_id"],
+            "status": run["status"],
+            "conclusion": run["conclusion"],
+            "event": run["event"],
+            "created_at": run["created_at"],
+            "updated_at": run["updated_at"],
+            "head_sha": run["head_sha"],
+            "html_url": run["html_url"],
+        })
+
+    return runs
+
+
+async def fetch_releases(
+    owner: str, repo: str, access_token: Optional[str] = None
+) -> list:
+    """Fetch repository releases."""
+    headers = get_github_headers(access_token)
+
+    async with httpx.AsyncClient() as client:
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
+        response = await client.get(api_url, headers=headers)
+
+    if response.status_code != 200:
+        if response.status_code == 403:
+            raise HTTPException(status_code=403, detail="GitHub API rate limit exceeded")
+        raise HTTPException(status_code=response.status_code, detail="Could not fetch releases")
+
+    releases = []
+    for rel in response.json():
+        releases.append({
+            "id": rel["id"],
+            "tag_name": rel["tag_name"],
+            "name": rel["name"],
+            "published_at": rel["published_at"],
+            "author": rel["author"]["login"],
+            "html_url": rel["html_url"],
+        })
+
+    return releases

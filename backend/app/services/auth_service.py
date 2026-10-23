@@ -224,14 +224,18 @@ class AuthService:
             return None
 
         # Check if token is expired
-        if github_token.expires_at and github_token.expires_at < datetime.now(
-            timezone.utc
-        ):
-            # Try to refresh
-            refreshed = self.refresh_token(github_token)
-            if refreshed:
-                return refreshed
-            return None
+        if github_token.expires_at:
+            # Ensure github_token.expires_at is offset-aware for comparison
+            expires_at = github_token.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+            if expires_at < datetime.now(timezone.utc):
+                # Try to refresh
+                refreshed = self.refresh_token(github_token)
+                if refreshed:
+                    return refreshed
+                return None
 
         return token_encryption.decrypt(github_token.encrypted_access_token)
 

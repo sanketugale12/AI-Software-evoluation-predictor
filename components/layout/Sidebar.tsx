@@ -20,7 +20,13 @@ const navigation = [
   { id: "architecture", label: "Architecture", icon: GitBranch },
   { id: "evolution", label: "Evolution", icon: GitGraph },
   { id: "security", label: "Security", icon: Shield },
+  { id: "pull_requests", label: "Pull Requests", icon: GitBranch },
+  { id: "issues", label: "Issues", icon: FileText },
+  { id: "projects", label: "Projects", icon: LayoutDashboard },
+  { id: "actions", label: "Actions", icon: GitGraph },
+  { id: "releases", label: "Releases", icon: GitBranch },
   { id: "assistant", label: "Assistant", icon: Bot },
+  { id: "settings", label: "Settings", icon: Shield },
 ] as const;
 
 type NavItem = (typeof navigation)[number];

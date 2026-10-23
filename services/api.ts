@@ -171,7 +171,7 @@ class AsepClient {
   async createSnapshot(owner: string, repo: string, commitSha: string, commitMessage?: string, commitDate?: string, treeJson?: Record<string, unknown>): Promise<Snapshot> {
     return fetchJson<Snapshot>(`${API_URL}/api/repositories/${owner}/${repo}/snapshots`, {
       method: "POST",
-      body: JSON.stringify({ commit_sha: commit_sha, commit_message: commitMessage, commit_date: commitDate, tree_json: treeJson }),
+      body: JSON.stringify({ commit_sha: commitSha, commit_message: commitMessage, commit_date: commitDate, tree_json: treeJson }),
     });
   }
 
@@ -224,4 +224,4 @@ class AsepClient {
 }
 
 export const asepClient = new AsepClient();
-export { setCurrentUserId, getCurrentUserId };
+
